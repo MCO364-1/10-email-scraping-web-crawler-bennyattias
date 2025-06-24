@@ -1,0 +1,17 @@
+
+2025-06-24 17:05:39 INFO  WebScraper - emailID: 1 email: CUSTOMERSERVICE@ADVANCED-ONLINE.COM source: HTTPS://SHOP.TOURO.EDU time: 17:05:39.781935700
+2025-06-24 17:05:39 INFO  WebScraper - emailID: 2 email: SAMPLE@DOMAIN.COM source: HTTPS://SHOP.TOURO.EDU time: 17:05:39.791934800
+2025-06-24 17:05:43 WARN  c.robots.SimpleRobotRulesParser - Problem processing robots.txt for https://TWITTER.COM/robots.txt
+2025-06-24 17:05:43 WARN  c.robots.SimpleRobotRulesParser - 	 Unknown line in robots.txt file (size 1350): Noindex: /i/u
+2025-06-24 17:07:22 INFO  WebScraper - emailID: 1 email: CUSTOMERSERVICE@ADVANCED-ONLINE.COM source: HTTPS://SHOP.TOURO.EDU time: 17:07:22.078077300
+2025-06-24 17:07:22 INFO  WebScraper - emailID: 2 email: SAMPLE@DOMAIN.COM source: HTTPS://SHOP.TOURO.EDU time: 17:07:22.088280500
+2025-06-24 17:07:25 WARN  c.robots.SimpleRobotRulesParser - Problem processing robots.txt for https://TWITTER.COM/robots.txt
+2025-06-24 17:07:25 WARN  c.robots.SimpleRobotRulesParser - 	 Unknown line in robots.txt file (size 1350): Noindex: /i/u
+2025-06-24 17:08:37 INFO  WebScraper - emailID: 3 email: C3AB8514873549D5B3785EBC7FB83C80@O1069899.INGEST.SENTRY.IO source: HTTPS://WWW.MOZILLA.ORG/FIREFOX time: 17:08:37.713769900
+2025-06-24 17:08:50 INFO  WebScraper - emailID: 4 email: SPARACK@X.COM source: HTTPS://TWITTERCOMMUNITY.COM/ time: 17:08:50.489260300
+2025-06-24 17:09:29 INFO  WebScraper - emailID: 1 email: CUSTOMERSERVICE@ADVANCED-ONLINE.COM source: HTTPS://SHOP.TOURO.EDU time: 17:09:29.314034
+2025-06-24 17:09:29 INFO  WebScraper - emailID: 2 email: SAMPLE@DOMAIN.COM source: HTTPS://SHOP.TOURO.EDU time: 17:09:29.325839600
+2025-06-24 17:09:35 WARN  c.robots.SimpleRobotRulesParser - Problem processing robots.txt for https://TWITTER.COM/robots.txt
+2025-06-24 17:09:35 WARN  c.robots.SimpleRobotRulesParser - 	 Unknown line in robots.txt file (size 1350): Noindex: /i/u
+2025-06-24 17:10:51 INFO  WebScraper - emailID: 3 email: C3AB8514873549D5B3785EBC7FB83C80@O1069899.INGEST.SENTRY.IO source: HTTPS://WWW.MOZILLA.ORG/FIREFOX time: 17:10:51.346341200
+2025-06-24 17:11:03 INFO  WebScraper - emailID: 4 email: SPARACK@X.COM source: HTTPS://TWITTERCOMMUNITY.COM/ time: 17:11:03.454947900
