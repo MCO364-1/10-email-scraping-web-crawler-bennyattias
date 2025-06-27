@@ -20,9 +20,8 @@ import java.net.UnknownHostException;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.*;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -50,26 +49,29 @@ Pseudocode:
 12- Once the while loop ends, connect to the database and bulk add the emails to the database
  */
 public class WebScraper implements Runnable {
-    private static Queue<String> linkQueue = new ConcurrentLinkedQueue<String>();
-    private static Set<String> linkSet = Collections.synchronizedSet(new HashSet<String>());
-    private static Set<String> emailSet = Collections.synchronizedSet(new HashSet<String>());
-    private static Set<String> robotsTxtSet = Collections.synchronizedSet(new HashSet<String>());
-    private static Map<String, Boolean> robotsTxtMap = Collections.synchronizedMap(new HashMap<String, Boolean>());
-    private static List<String> agentNames = Collections.synchronizedList(new ArrayList<String>());
-    private static SimpleRobotRulesParser parser = new SimpleRobotRulesParser();
-    private static BaseRobotRules rules = null;
-    private static URL u = null;
-    private static URLConnection connection = null;
-    private static byte[] content = null;
-    private static Document doc = null;
-    private static WebScraper webScraper;
-    private static Logger logger = LoggerFactory.getLogger(WebScraper.class);
-    private static int emailCount = 0;
+    private static volatile Queue<String> linkQueue = new ConcurrentLinkedQueue<String>();
+    private static volatile Set<String> linkSet = Collections.synchronizedSet(new HashSet<String>());
+    private static volatile Set<String> emailSet = Collections.synchronizedSet(new HashSet<String>());
+    private static volatile Set<String> robotsTxtSet = Collections.synchronizedSet(new HashSet<String>());
+    private static volatile Map<String, Boolean> robotsTxtMap = Collections.synchronizedMap(new HashMap<String, Boolean>());
+    private static volatile List<String> agentNames = Collections.synchronizedList(new ArrayList<String>());
+    private static volatile SimpleRobotRulesParser parser = new SimpleRobotRulesParser();
+    private BaseRobotRules rules = null;
+    private URL u = null;
+    private URLConnection connection = null;
+    private byte[] content = null;
+    private Document doc = null; //This wont work on multi threading
+    private static volatile Logger logger = LoggerFactory.getLogger(WebScraper.class);
+    private static volatile AtomicInteger emailCount = new AtomicInteger(0);
 
-    public static void main(String[] args) throws MalformedURLException, IOException {
-        webScraper = new WebScraper();
-        ExecutorService executor = Executors.newFixedThreadPool(5000);
-        executor.submit(webScraper);
+    public static synchronized void main(String[] args) throws MalformedURLException, IOException {
+        agentNames.add("Mozilla/5.0");
+        linkQueue.add("HTTPS://WWW.TOURO.EDU");
+        linkSet.add("HTTPS://WWW.TOURO.EDU");
+        ExecutorService executor = Executors.newFixedThreadPool(50);
+        for (int i = 0; i < 50; i++) {
+            executor.submit(new WebScraper());
+        }
         executor.shutdown();
     }
 
@@ -77,55 +79,69 @@ public class WebScraper implements Runnable {
 
     }
 
-    public synchronized void run(){
-        agentNames.add("Mozilla/5.0");
-        linkQueue.add("HTTPS://WWW.TOURO.EDU");
-        linkSet.add("HTTPS://WWW.TOURO.EDU");
+    public synchronized void run() {
 
-        while (emailSet.size() < 10000) {
-            String link = linkQueue.poll();
-            try {
-                this.doc = Jsoup.connect(link)
-                        .ignoreHttpErrors(true)
-                        .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36")
-                        .get();
-            } catch (IllegalArgumentException e) {
-                e.printStackTrace();
-                continue;
-            } catch (UnknownHostException e) {
-                e.printStackTrace();
-                continue;
-            } catch (HttpStatusException e) {
-                e.printStackTrace();
-                continue;
-            } catch (IOException e) {
-                e.printStackTrace();
-                continue;
-            }
-
-            try {
-                if (isScrapeAllowed(link)) {
-                    Elements html = doc.getElementsByTag("a");
-                    scrapeLinks(html);
-                    html = doc.getAllElements();
-                    scrapeEmails(html, link);
-                    System.out.println(doc.title());
-                    System.out.println("linkset:" + linkSet);
-                    System.out.println("------------------------");
-                    System.out.println("linkqueue:" + linkQueue);
-                    System.out.println("------------------------");
-                    System.out.println("emailSet:" + emailSet);
-                    System.out.println("linkset size:" + linkSet.size());
+            while (emailSet.size() < 10000) {
+                String link;
+                while (true){
+                    System.out.println("trying to get next");
+                    link = linkQueue.poll();
+                    if (link != null) {
+                        break;
+                    }
+                    try {
+                        TimeUnit.SECONDS.sleep(1);
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
                 }
-            } catch (FileNotFoundException e){
-                e.printStackTrace();
-                continue;
-            } catch (IOException e) {
-                e.printStackTrace();
-                continue;
+                try {
+                    //TimeUnit.SECONDS.sleep(1);
+//                        logger.info("Link: " + link);
+//                        logger.warn("Link: " + link);
+//                        logger.debug("Link: " + link);
+                    this.doc = Jsoup.connect(link)
+                            //.ignoreHttpErrors(true)
+                            .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.6998.166 Safari/537.36")
+                            .get();
+//                        logger.info("Link: " + link);
+//                        logger.warn("Link: " + link);
+//                        logger.debug("Link: " + link);
+                } catch (IllegalArgumentException e) {
+                    e.printStackTrace();
+                    continue;
+                } catch (UnknownHostException e) {
+                    e.printStackTrace();
+                    continue;
+                } catch (HttpStatusException e) {
+                    e.printStackTrace();
+                    continue;
+                } catch (IOException e) {
+                    e.printStackTrace();
+                    continue;
+                }
+
+
+//                            logger.info("Scraping html of" + link);
+                        Elements html = doc.getElementsByTag("a");
+                try {
+                    scrapeLinks(html);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+//                            logger.info("scraped html of " + link);
+//                            logger.info("Scraping emails of " + link);
+                        html = doc.getAllElements();
+//                            logger.info("scraped emails of " + link);
+                        scrapeEmails(html, link);
+                            logger.info("scraped emails of " + link);
+                            System.out.println(doc.title());
+                            System.out.println("emailSet:" + emailSet);
+                            System.out.println("emailset size:" + emailSet.size());
+
             }
-        }
     }
+
 
     /**
      * Method to remove the surrounding html tags/attributes from the plain email address
@@ -134,16 +150,26 @@ public class WebScraper implements Runnable {
      * @param html, an Elements object
      */
 
-    public static synchronized void scrapeEmails(Elements html, String link) {
+    public boolean scrapeEmails(Elements html, String link) {
+        logger.info("from scrapeEmails method: scraping emails of " + link);
         String htmlString = html.toString();
-        Pattern pattern = Pattern.compile("(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,6}");
+        Pattern pattern = Pattern.compile("(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,6}"); //TODO get a better regex from very good developers on stackoverflow
         Matcher matcher = pattern.matcher(htmlString);
+        logger.info("before while loop");
         while (matcher.find()) {
+            logger.info("inside while loop");
             String email = matcher.group().toUpperCase();
-            if (emailSet.add(email)){
-                logger.info("emailID: " + ++emailCount + " email: " + email + " source: " + link + " time: " + LocalTime.now());
+            if(email.endsWith(".PNG") || email.endsWith(".JPG") || email.endsWith(".JPEG") || email.endsWith(".GIF") || email.endsWith(".PDF") || email.endsWith(".WEBP")) {
+                continue;
             }
+            logger.info("inside while loop after to upper case");//(?!.*(\.png|\.jpg|\.gif|\.pdf).*)
+            if (emailSet.add(email)){
+                logger.info("emailID: " + emailCount.incrementAndGet() + " email: " + email + " source: " + link + " time: " + LocalTime.now()); //TODO only emails and count
+            }// TODO not saving to the DB
+            return true;
         }
+        logger.info("after while loop");
+        return false;
     }
 
     /**
@@ -153,13 +179,13 @@ public class WebScraper implements Runnable {
      */
     //   https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()!@:%_\+.~#?&\/\/=]*)
 
-    public static synchronized void scrapeLinks(Elements html) {
+    public void scrapeLinks(Elements html) throws IOException {
         String htmlString = html.toString();
-        Pattern pattern = Pattern.compile("(?i)(?!.*(png|jpg|gif).*$)https?:\\/\\/(www\\.)?[-a-zA-Z0-9@:%._\\+~#=]{1,256}\\.[a-zA-Z0-9()]{1,6}\\b([-a-zA-Z0-9()!@:%_\\+.~#?&\\/\\/=]*)");
+        Pattern pattern = Pattern.compile("(?i)(?!.*(\\.png|\\.jpg|\\.gif|\\.pdf|twitter|vimeo|x\\.com|\\.gov).*)https?:\\/\\/(www\\.)?[-a-zA-Z0-9@:%._\\+~#=]{1,256}\\.[a-zA-Z0-9()]{1,6}\\b([-a-zA-Z0-9()!@:%_\\+.~#?&\\/\\/=]*)");
         Matcher matcher = pattern.matcher(htmlString);
         while (matcher.find()) {
-            String link = matcher.group().toUpperCase();
-            if (isValidURL(link) && linkSet.add(link)){
+            String link = matcher.group(0).toUpperCase();
+            if (isScrapeAllowed(link) && linkSet.add(link)) {
                 linkQueue.add(link);
             }
         }
@@ -171,30 +197,62 @@ public class WebScraper implements Runnable {
      * @return a boolean which represents the website's allowing or prohibiting scraping
      * @throws IOException
      */
-    public synchronized boolean isScrapeAllowed(String link) throws IOException {
+    public boolean isScrapeAllowed(String link) { //todo once thigns are working try to remove this seemingly redundant syncrhonized
         Pattern pattern = Pattern.compile("(?i)[-a-zA-Z0-9@%._\\+~#=]{2,256}\\.[a-z]{2,6}\\b");
         Matcher matcher = pattern.matcher(link);
         String url = "";
         if (matcher.find()){
             url = "https://" + matcher.group() + "/robots.txt";
         }
+        logger.info("link: " + link);
         if (!isValidURL(link)){
+            logger.info("link: " + link + " is not a valid URL");
             return false;
         }
         if (!robotsTxtSet.add(url)){
+            logger.info("robotsTxtSet: " + url + " already exists");
             return robotsTxtMap.get(url);
         }
-        this.u = new URL(url);
-        this.connection = u.openConnection();
-        this.content = IOUtils.toByteArray(connection);
-        this.rules = parser.parseContent(url, content, "text/plain", agentNames);
-        boolean isAllowed = rules.isAllowed(url);
-        robotsTxtMap.put(url, isAllowed);
-        return isAllowed;
+
+        try {
+            u = new URL(url);
+        } catch (MalformedURLException e) {
+            robotsTxtMap.put(url, false);
+            logger.info("isAllowed: " + false);
+            return false;
+        }
+        try {
+            connection = u.openConnection();
+        } catch (IOException e) {
+            robotsTxtMap.put(url, false);
+            logger.info("isAllowed: " + false);
+            return false;
+        }
+        logger.info("connection: " + connection);
+        try {
+            content = IOUtils.toByteArray(connection);
+        } catch (IOException e) {
+            robotsTxtMap.put(url, false);
+            logger.info("isAllowed: " + false);
+            return false;
+        } //emailSet:[%20MARKETING@HIRINGTHING.COM, PRIVACY@IMPERVA.COM, CANGRADE@4X.PNG, HT-ATS-AND-OB-ILLUSTRATION-HOMEPAGE@2X-1024X893.PNG, SUPPORT@HIRINGTHING.COM, HT-ATS-ILLUSTRATION-BOTH-HEX-FOR-LIGHT@2X-1024X685.PNG, 3BBE57A973254129BCB93E47DC0CC46F@O343074.INGEST.SENTRY.IO, INFO@HRLOGICS.COM, HIRINGTHING-LOGO-BLUE@2X.PNG, CUSTOMERSERVICE@ADVANCED-ONLINE.COM, MARKETING@HIRINGTHING.COM, INFO@JOBMA.COM]
+        rules = parser.parseContent(url, content, "text/plain", agentNames);
+            boolean isAllowed = rules.isAllowed(url);
+            robotsTxtMap.put(url, isAllowed);
+            logger.info("isAllowed: " + isAllowed);
+            return isAllowed;
     }
 
-    public static synchronized boolean isValidURL(String link) {
+    public boolean isValidURL(String link) {
         UrlValidator validator = new UrlValidator(UrlValidator.ALLOW_2_SLASHES + UrlValidator.ALLOW_ALL_SCHEMES + UrlValidator.NO_FRAGMENTS + UrlValidator.ALLOW_LOCAL_URLS);
+        if (doc.title().contains("404")
+                || doc.title().contains("Not Found")
+                || link.contains("TWITTER")
+                || link.contains("X.COM")
+                || link.contains("SHOPIFY")) {
+            logger.info("404 Not Found");
+            return false;
+        }
         return validator.isValid(link);
     }
 }
