@@ -11,12 +11,16 @@ import org.jsoup.select.Elements;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.swing.*;
+import java.io.BufferedReader;
 import java.io.FileNotFoundException;
+import java.io.FileReader;
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLConnection;
 import java.net.UnknownHostException;
+import java.sql.*;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.*;
@@ -63,14 +67,18 @@ public class WebScraper implements Runnable {
     private Document doc = null; //This wont work on multi threading
     private static volatile Logger logger = LoggerFactory.getLogger(WebScraper.class);
     private static volatile AtomicInteger emailCount = new AtomicInteger(0);
+    private static volatile Map<String, String> env = Collections.synchronizedMap(new HashMap<>());
+    private static volatile Queue<EmailData> emailDataQueue = new ConcurrentLinkedQueue<EmailData>();
+    private static final int MAX_CONNECTIONS = 10;
+    private static final ConnectionPool connectionPool = new ConnectionPool(MAX_CONNECTIONS);
 
     public static synchronized void main(String[] args) throws MalformedURLException, IOException {
         agentNames.add("Mozilla/5.0");
         linkQueue.add("HTTPS://WWW.TOURO.EDU");
         linkSet.add("HTTPS://WWW.TOURO.EDU");
-        ExecutorService executor = Executors.newFixedThreadPool(50);
-        for (int i = 0; i < 50; i++) {
-            executor.submit(new WebScraper());
+        ExecutorService executor = Executors.newFixedThreadPool(550);//10threads & 10tasks = 17 emails in 10 minutes; 16threads & 1000tasks = 40emails; 500threads & 1000tasks = 155 emails;
+        for (int i = 0; i < 550; i++) {      //1000 & 1000 = SLOW; 400 & 400 = 216; 300 and 300 = 202; 600 & 600 similar to 500;
+            executor.submit(new WebScraper()); //500 - 44s,20s, 40s; 550 - 22s, 29s, 21s; 600 - 60s, 31s,; 575 - 21s, 34s, 21s,
         }
         executor.shutdown();
     }
@@ -82,8 +90,56 @@ public class WebScraper implements Runnable {
     public synchronized void run() {
 
             while (emailSet.size() < 10000) {
+
+                if (emailSet.size() >= 3) {
+                    logger.info("entered database insertion section");
+                    env = System.getenv();
+                    String endpoint = env.get("db_connection");
+
+                    String connectionUrl =
+                            "jdbc:sqlserver://" + endpoint + ";"
+                                    + "database=" + env.get("database") + ";"
+                                    + "user=" + env.get("user") + ";"
+                                    + "password=" + env.get("password") + ";"
+                                    + "encrypt=true;"
+                                    + "trustServerCertificate=true;"
+                                    + "loginTimeout=30;";
+
+                    synchronized (this) {
+                        try (Connection connection = DriverManager.getConnection(connectionUrl);
+                             Statement statement = connection.createStatement()) {
+                            logger.info("entered database insertion section synchronized part 1");
+                            // Multi-row insert - Much more efficient
+                            String sql = "INSERT INTO Emails (EmailID, Email, Source, TimeStamp) VALUES (?, ?, ?, ?)";
+                            for (int i = 0; i < 3; i++) {
+                                sql = sql + ", (?, ?, ?, ?)";
+                            }
+                            sql = sql + ";";
+                            logger.info("entered database insertion section synchronized part 2");
+                            PreparedStatement stmt = connection.prepareStatement(sql);
+                            // Set all parameters in one go
+                            int counter = 0;
+                            for (int i = 0; i < 3; i++) {
+                                EmailData emailData = emailDataQueue.poll();
+                                stmt.setString(counter + i + 1, String.valueOf(emailData.getEmailId()));
+                                stmt.setString(counter + i + 2, String.valueOf(emailData.getEmail()));
+                                stmt.setString(counter + i + 3, String.valueOf(emailData.getSource()));
+                                stmt.setString(counter + i + 4, String.valueOf(emailData.getTimestamp()));
+                                counter += 3;
+                            }
+                            logger.info("entered database insertion section synchronized part 3");
+                            // And so on...
+                            stmt.execute();
+                            logger.info("executed database insertion section");
+                        } catch (SQLException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                }
+
+
                 String link;
-                while (true){
+                while (true) {
                     System.out.println("trying to get next");
                     link = linkQueue.poll();
                     if (link != null) {
@@ -95,6 +151,7 @@ public class WebScraper implements Runnable {
                         throw new RuntimeException(e);
                     }
                 }
+
                 try {
                     //TimeUnit.SECONDS.sleep(1);
 //                        logger.info("Link: " + link);
@@ -134,7 +191,7 @@ public class WebScraper implements Runnable {
                         html = doc.getAllElements();
 //                            logger.info("scraped emails of " + link);
                         scrapeEmails(html, link);
-                            logger.info("scraped emails of " + link);
+//                            logger.info("scraped emails of " + link);
                             System.out.println(doc.title());
                             System.out.println("emailSet:" + emailSet);
                             System.out.println("emailset size:" + emailSet.size());
@@ -150,26 +207,28 @@ public class WebScraper implements Runnable {
      * @param html, an Elements object
      */
 
-    public boolean scrapeEmails(Elements html, String link) {
-        logger.info("from scrapeEmails method: scraping emails of " + link);
+    public void scrapeEmails(Elements html, String link) {
+//        logger.info("from scrapeEmails method: scraping emails of " + link);
         String htmlString = html.toString();
-        Pattern pattern = Pattern.compile("(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,6}"); //TODO get a better regex from very good developers on stackoverflow
+        Pattern pattern = Pattern.compile("(?i)[A-Z0-9._%+-]+@[A-Z0-9\\.-_]+\\.[A-Z]{2,10}"); //TODO get a better regex from very good developers on stackoverflow
         Matcher matcher = pattern.matcher(htmlString);
-        logger.info("before while loop");
+//        logger.info("before while loop");
         while (matcher.find()) {
-            logger.info("inside while loop");
+//            logger.info("inside while loop");
             String email = matcher.group().toUpperCase();
-            if(email.endsWith(".PNG") || email.endsWith(".JPG") || email.endsWith(".JPEG") || email.endsWith(".GIF") || email.endsWith(".PDF") || email.endsWith(".WEBP")) {
+            if(email.endsWith(".PNG") || email.endsWith(".JPG") || email.endsWith(".JPEG")
+            || email.endsWith(".GIF") || email.endsWith(".PDF") || email.endsWith(".WEBP")
+            || email.contains("SENTRY") || email.endsWith(".SVG") || email.endsWith(".WEBPACK")
+            || email.endsWith(".CSS") || email.endsWith(".JS") || email.endsWith(".HTML")) {
                 continue;
             }
-            logger.info("inside while loop after to upper case");//(?!.*(\.png|\.jpg|\.gif|\.pdf).*)
+//            logger.info("inside while loop after to upper case");//(?!.*(\.png|\.jpg|\.gif|\.pdf).*)
             if (emailSet.add(email)){
-                logger.info("emailID: " + emailCount.incrementAndGet() + " email: " + email + " source: " + link + " time: " + LocalTime.now()); //TODO only emails and count
-            }// TODO not saving to the DB
-            return true;
+                logger.info("emailID: " + emailCount.incrementAndGet() + " email: " + email);
+                emailDataQueue.add(new EmailData(emailCount, email, link, Timestamp.valueOf(LocalDateTime.now())));
+            }
         }
-        logger.info("after while loop");
-        return false;
+//        logger.info("after while loop");
     }
 
     /**
@@ -204,13 +263,13 @@ public class WebScraper implements Runnable {
         if (matcher.find()){
             url = "https://" + matcher.group() + "/robots.txt";
         }
-        logger.info("link: " + link);
+//        logger.info("link: " + link);
         if (!isValidURL(link)){
-            logger.info("link: " + link + " is not a valid URL");
+//            logger.info("link: " + link + " is not a valid URL");
             return false;
         }
         if (!robotsTxtSet.add(url)){
-            logger.info("robotsTxtSet: " + url + " already exists");
+//            logger.info("robotsTxtSet: " + url + " already exists");
             return robotsTxtMap.get(url);
         }
 
@@ -218,28 +277,28 @@ public class WebScraper implements Runnable {
             u = new URL(url);
         } catch (MalformedURLException e) {
             robotsTxtMap.put(url, false);
-            logger.info("isAllowed: " + false);
+//            logger.info("isAllowed: " + false);
             return false;
         }
         try {
             connection = u.openConnection();
         } catch (IOException e) {
             robotsTxtMap.put(url, false);
-            logger.info("isAllowed: " + false);
+//            logger.info("isAllowed: " + false);
             return false;
         }
-        logger.info("connection: " + connection);
+//        logger.info("connection: " + connection);
         try {
             content = IOUtils.toByteArray(connection);
         } catch (IOException e) {
             robotsTxtMap.put(url, false);
-            logger.info("isAllowed: " + false);
+//            logger.info("isAllowed: " + false);
             return false;
         } //emailSet:[%20MARKETING@HIRINGTHING.COM, PRIVACY@IMPERVA.COM, CANGRADE@4X.PNG, HT-ATS-AND-OB-ILLUSTRATION-HOMEPAGE@2X-1024X893.PNG, SUPPORT@HIRINGTHING.COM, HT-ATS-ILLUSTRATION-BOTH-HEX-FOR-LIGHT@2X-1024X685.PNG, 3BBE57A973254129BCB93E47DC0CC46F@O343074.INGEST.SENTRY.IO, INFO@HRLOGICS.COM, HIRINGTHING-LOGO-BLUE@2X.PNG, CUSTOMERSERVICE@ADVANCED-ONLINE.COM, MARKETING@HIRINGTHING.COM, INFO@JOBMA.COM]
         rules = parser.parseContent(url, content, "text/plain", agentNames);
             boolean isAllowed = rules.isAllowed(url);
             robotsTxtMap.put(url, isAllowed);
-            logger.info("isAllowed: " + isAllowed);
+//            logger.info("isAllowed: " + isAllowed);
             return isAllowed;
     }
 
@@ -250,7 +309,7 @@ public class WebScraper implements Runnable {
                 || link.contains("TWITTER")
                 || link.contains("X.COM")
                 || link.contains("SHOPIFY")) {
-            logger.info("404 Not Found");
+//            logger.info("404 Not Found");
             return false;
         }
         return validator.isValid(link);
