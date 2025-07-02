@@ -40,48 +40,41 @@ public class Main {
     public static void main(String[] args) throws IOException {
         WebScraper webScraper = new WebScraper();
 
-        String sql = "INSERT INTO Emails (EmailID, Email, Source, TimeStamp) VALUES (?, ?, ?, ?)";
-        for (int i = 0; i < 3; i++) {
-            sql = sql + ", (?, ?, ?, ?)";
-        }
-        sql = sql + ";";
-        System.out.println(sql);
+        Map<String, String> env = System.getenv();
+        String endpoint = env.get("db_connection");
+        System.out.println(env.get("user"));
 
-//        Map<String, String> env = System.getenv();
-//        String endpoint = env.get("db_connection");
-//        System.out.println(env.get("user"));
-//
-//        String connectionUrl =
-//                "jdbc:sqlserver://" + endpoint + ";"
-//                        + "database=" + env.get("database") + ";"
-//                        + "user=" + env.get("user") + ";"
-//                        + "password=" + env.get("password") + ";"
-//                        + "encrypt=true;"
-//                        + "trustServerCertificate=true;"
-//                        + "loginTimeout=30;";
-//        try (Connection connection = DriverManager.getConnection(connectionUrl);
-//             Statement statement = connection.createStatement()) {
-//            // Multi-row insert - Much more efficient
-//            String sql = "INSERT INTO Emails (EmailID, Email, Source, TimeStamp) VALUES (?, ?, ?, ?)";
-////            for (int i = 0; i < 3; i++) {
-////                sql = sql + ", (?, ?, ?, ?)";
-////            }
-////            sql = sql + ";";
-//
-//            PreparedStatement stmt = connection.prepareStatement(sql);
-//            // Set all parameters in one go
-//                stmt.setString( 1, String.valueOf(1));
-//                stmt.setString( 2, String.valueOf("abc@gmail.com"));
-//                stmt.setString( 3, String.valueOf("HTTPS://gmail.com"));
-//                stmt.setString( 4, String.valueOf(Timestamp.valueOf(LocalDateTime.now())));
-//
-//            // And so on...
-//            stmt.execute();
-//
-//        } catch (SQLException e) {
-//            e.printStackTrace();
-//        }
-//    }
+        String connectionUrl =
+                "jdbc:sqlserver://" + endpoint + ";"
+                        + "database=" + env.get("database") + ";"
+                        + "user=" + env.get("user") + ";"
+                        + "password=" + env.get("password") + ";"
+                        + "encrypt=true;"
+                        + "trustServerCertificate=true;"
+                        + "loginTimeout=30;";
+
+        try (Connection connection = DriverManager.getConnection(connectionUrl)) {
+            // Multi-row insert - Much more efficient
+            String sql = "INSERT INTO Emails (EmailID, Email, Source, TimeStamp) VALUES (?, ?, ?, ?)";
+            for (int i = 0; i < 3; i++) {
+                sql = sql + ", (?, ?, ?, ?)";
+            }
+            sql = sql + ";";
+
+            PreparedStatement stmt = connection.prepareStatement(sql);
+            // Set all parameters in one go
+                stmt.setString( 1, String.valueOf(1));
+                stmt.setString( 2, String.valueOf("abc@gmail.com"));
+                stmt.setString( 3, String.valueOf("HTTPS://www.gmail.com"));
+                stmt.setString( 4, String.valueOf(Timestamp.valueOf(LocalDateTime.now())));
+
+            // And so on...
+            stmt.execute();
+
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+
 //
 //        Document doc = Jsoup.connect("https://touro.edu")
 //                .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36")

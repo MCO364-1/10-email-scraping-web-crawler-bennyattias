@@ -69,8 +69,8 @@ public class WebScraper implements Runnable {
     private static volatile AtomicInteger emailCount = new AtomicInteger(0);
     private static volatile Map<String, String> env = Collections.synchronizedMap(new HashMap<>());
     private static volatile Queue<EmailData> emailDataQueue = new ConcurrentLinkedQueue<EmailData>();
-    private static final int MAX_CONNECTIONS = 10;
-    private static final ConnectionPool connectionPool = new ConnectionPool(MAX_CONNECTIONS);
+
+
 
     public static synchronized void main(String[] args) throws MalformedURLException, IOException {
         agentNames.add("Mozilla/5.0");
@@ -87,31 +87,34 @@ public class WebScraper implements Runnable {
 
     }
 
-    public synchronized void run() {
+
+    public void run() {
 
             while (emailSet.size() < 10000) {
 
-                if (emailSet.size() >= 3) {
-                    logger.info("entered database insertion section");
-                    env = System.getenv();
-                    String endpoint = env.get("db_connection");
-
-                    String connectionUrl =
-                            "jdbc:sqlserver://" + endpoint + ";"
-                                    + "database=" + env.get("database") + ";"
-                                    + "user=" + env.get("user") + ";"
-                                    + "password=" + env.get("password") + ";"
-                                    + "encrypt=true;"
-                                    + "trustServerCertificate=true;"
-                                    + "loginTimeout=30;";
-
+                if (emailDataQueue.size() >= 3) {
                     synchronized (this) {
-                        try (Connection connection = DriverManager.getConnection(connectionUrl);
-                             Statement statement = connection.createStatement()) {
+                        logger.info("entered database insertion section");
+                        env = System.getenv();
+                        String endpoint = env.get("db_connection");
+
+                        String connectionUrl =
+                                "jdbc:sqlserver://" + endpoint + ";"
+                                        + "database=" + env.get("database") + ";"
+                                        + "user=" + env.get("user") + ";"
+                                        + "password=" + env.get("password") + ";"
+                                        + "encrypt=true;"
+                                        + "trustServerCertificate=true;"
+                                        + "loginTimeout=30;";
+
+//                        DriverManager.setLoginTimeout(30);
+                        Connection connection = null;
+                        try {
+                            connection = DriverManager.getConnection(connectionUrl);
                             logger.info("entered database insertion section synchronized part 1");
                             // Multi-row insert - Much more efficient
                             String sql = "INSERT INTO Emails (EmailID, Email, Source, TimeStamp) VALUES (?, ?, ?, ?)";
-                            for (int i = 0; i < 3; i++) {
+                            for (int i = 0; i < 2; i++) {
                                 sql = sql + ", (?, ?, ?, ?)";
                             }
                             sql = sql + ";";
@@ -133,6 +136,14 @@ public class WebScraper implements Runnable {
                             logger.info("executed database insertion section");
                         } catch (SQLException e) {
                             e.printStackTrace();
+                        } finally {
+                            try {
+                                if (connection != null) {
+                                    connection.close();
+                                }
+                            } catch (SQLException ex) {
+                                ex.printStackTrace();
+                            }
                         }
                     }
                 }
@@ -153,17 +164,10 @@ public class WebScraper implements Runnable {
                 }
 
                 try {
-                    //TimeUnit.SECONDS.sleep(1);
-//                        logger.info("Link: " + link);
-//                        logger.warn("Link: " + link);
-//                        logger.debug("Link: " + link);
                     this.doc = Jsoup.connect(link)
                             //.ignoreHttpErrors(true)
                             .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.6998.166 Safari/537.36")
                             .get();
-//                        logger.info("Link: " + link);
-//                        logger.warn("Link: " + link);
-//                        logger.debug("Link: " + link);
                 } catch (IllegalArgumentException e) {
                     e.printStackTrace();
                     continue;
@@ -178,20 +182,14 @@ public class WebScraper implements Runnable {
                     continue;
                 }
 
-
-//                            logger.info("Scraping html of" + link);
                         Elements html = doc.getElementsByTag("a");
                 try {
                     scrapeLinks(html);
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
-//                            logger.info("scraped html of " + link);
-//                            logger.info("Scraping emails of " + link);
                         html = doc.getAllElements();
-//                            logger.info("scraped emails of " + link);
                         scrapeEmails(html, link);
-//                            logger.info("scraped emails of " + link);
                             System.out.println(doc.title());
                             System.out.println("emailSet:" + emailSet);
                             System.out.println("emailset size:" + emailSet.size());
@@ -226,6 +224,7 @@ public class WebScraper implements Runnable {
             if (emailSet.add(email)){
                 logger.info("emailID: " + emailCount.incrementAndGet() + " email: " + email);
                 emailDataQueue.add(new EmailData(emailCount, email, link, Timestamp.valueOf(LocalDateTime.now())));
+                logger.info(emailDataQueue.toString());
             }
         }
 //        logger.info("after while loop");
