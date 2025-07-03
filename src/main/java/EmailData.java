@@ -3,20 +3,20 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 
 public class EmailData {
-    private AtomicInteger emailId;
+    private int emailId;
     private String email;
     private String source;
     private Timestamp timestamp;
 
 
-    public EmailData(AtomicInteger emailId, String email, String source, Timestamp timestamp) {
+    public EmailData(int emailId, String email, String source, Timestamp timestamp) {
         this.emailId = emailId;
         this.email = email;
         this.source = source;
         this.timestamp = timestamp;
     }
 
-    public AtomicInteger getEmailId() {
+    public int getEmailId() {
         return emailId;
     }
 

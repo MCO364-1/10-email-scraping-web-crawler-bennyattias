@@ -1,20 +1,13 @@
 import crawlercommons.robots.BaseRobotRules;
-import crawlercommons.robots.SimpleRobotRules;
 import crawlercommons.robots.SimpleRobotRulesParser;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.validator.routines.UrlValidator;
 import org.jsoup.HttpStatusException;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import javax.swing.*;
-import java.io.BufferedReader;
-import java.io.FileNotFoundException;
-import java.io.FileReader;
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URL;
@@ -22,7 +15,6 @@ import java.net.URLConnection;
 import java.net.UnknownHostException;
 import java.sql.*;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -64,11 +56,12 @@ public class WebScraper implements Runnable {
     private URL u = null;
     private URLConnection connection = null;
     private byte[] content = null;
-    private Document doc = null; //This wont work on multi threading
+    private Document doc = null; //This won't work on multi threading
     private static volatile Logger logger = LoggerFactory.getLogger(WebScraper.class);
     private static volatile AtomicInteger emailCount = new AtomicInteger(0);
     private static volatile Map<String, String> env = Collections.synchronizedMap(new HashMap<>());
     private static volatile Queue<EmailData> emailDataQueue = new ConcurrentLinkedQueue<EmailData>();
+    private static final Object lock = new Object();
 
 
 
@@ -90,111 +83,102 @@ public class WebScraper implements Runnable {
 
     public void run() {
 
-            while (emailSet.size() < 10000) {
+        while (emailSet.size() < 10000) {
 
-                if (emailDataQueue.size() >= 3) {
-                    synchronized (this) {
-                        logger.info("entered database insertion section");
-                        env = System.getenv();
-                        String endpoint = env.get("db_connection");
+            // Check if we have enough emails to insert into database
+            synchronized (lock) {
+                int bulkQuantity = 500;
+                if (emailDataQueue.size() >= bulkQuantity) {
 
-                        String connectionUrl =
-                                "jdbc:sqlserver://" + endpoint + ";"
-                                        + "database=" + env.get("database") + ";"
-                                        + "user=" + env.get("user") + ";"
-                                        + "password=" + env.get("password") + ";"
-                                        + "encrypt=true;"
-                                        + "trustServerCertificate=true;"
-                                        + "loginTimeout=30;";
+                    Map<String, String> env = System.getenv();
+                    String endpoint = env.get("db_connection");
+                    System.out.println(env.get("user"));
 
-//                        DriverManager.setLoginTimeout(30);
-                        Connection connection = null;
-                        try {
-                            connection = DriverManager.getConnection(connectionUrl);
-                            logger.info("entered database insertion section synchronized part 1");
-                            // Multi-row insert - Much more efficient
-                            String sql = "INSERT INTO Emails (EmailID, Email, Source, TimeStamp) VALUES (?, ?, ?, ?)";
-                            for (int i = 0; i < 2; i++) {
-                                sql = sql + ", (?, ?, ?, ?)";
-                            }
-                            sql = sql + ";";
-                            logger.info("entered database insertion section synchronized part 2");
-                            PreparedStatement stmt = connection.prepareStatement(sql);
+                    String connectionUrl =
+                            "jdbc:sqlserver://" + endpoint + ";"
+                                    + "database=" + env.get("database") + ";"
+                                    + "user=" + env.get("user") + ";"
+                                    + "password=" + env.get("password") + ";"
+                                    + "encrypt=true;"
+                                    + "trustServerCertificate=true;"
+                                    + "loginTimeout=30;";
+
+                    try (Connection connection = DriverManager.getConnection(connectionUrl)) {
+                        // Multi-row insert - Much more efficient
+                        String sql = "INSERT INTO Emails (EmailID, Email, Source, TimeStamp) VALUES (?, ?, ?, ?)";
+                        for (int i = 0; i < bulkQuantity - 1; i++) {
+                            sql = sql + ", (?, ?, ?, ?)";
+                        }
+                        sql = sql + ";";
+
+                        try (PreparedStatement stmt = connection.prepareStatement(sql)) {
                             // Set all parameters in one go
                             int counter = 0;
-                            for (int i = 0; i < 3; i++) {
+                            for (int i = 0; i < bulkQuantity; i++) {
                                 EmailData emailData = emailDataQueue.poll();
-                                stmt.setString(counter + i + 1, String.valueOf(emailData.getEmailId()));
-                                stmt.setString(counter + i + 2, String.valueOf(emailData.getEmail()));
-                                stmt.setString(counter + i + 3, String.valueOf(emailData.getSource()));
-                                stmt.setString(counter + i + 4, String.valueOf(emailData.getTimestamp()));
-                                counter += 3;
+                                int index = i * 4 + 1;
+                                stmt.setString(index, String.valueOf(emailData.getEmailId()));
+                                stmt.setString(index + 1, String.valueOf(emailData.getEmail()));
+                                stmt.setString(index + 2, String.valueOf(emailData.getSource()));
+                                stmt.setString(index + 3, String.valueOf(emailData.getTimestamp()));
                             }
-                            logger.info("entered database insertion section synchronized part 3");
+//                            logger.info("Executing thread: " + Thread.currentThread().getName());
                             // And so on...
                             stmt.execute();
-                            logger.info("executed database insertion section");
-                        } catch (SQLException e) {
-                            e.printStackTrace();
-                        } finally {
-                            try {
-                                if (connection != null) {
-                                    connection.close();
-                                }
-                            } catch (SQLException ex) {
-                                ex.printStackTrace();
-                            }
                         }
+
+                    } catch (SQLException e) {
+                        e.printStackTrace();
                     }
                 }
+            }
 
 
-                String link;
-                while (true) {
-                    System.out.println("trying to get next");
-                    link = linkQueue.poll();
-                    if (link != null) {
-                        break;
-                    }
-                    try {
-                        TimeUnit.SECONDS.sleep(1);
-                    } catch (InterruptedException e) {
-                        throw new RuntimeException(e);
-                    }
+
+            String link;
+            while (true) {
+                link = linkQueue.poll();
+                if (link != null) {
+                    break;
                 }
-
                 try {
-                    this.doc = Jsoup.connect(link)
-                            //.ignoreHttpErrors(true)
-                            .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.6998.166 Safari/537.36")
-                            .get();
-                } catch (IllegalArgumentException e) {
-                    e.printStackTrace();
-                    continue;
-                } catch (UnknownHostException e) {
-                    e.printStackTrace();
-                    continue;
-                } catch (HttpStatusException e) {
-                    e.printStackTrace();
-                    continue;
-                } catch (IOException e) {
-                    e.printStackTrace();
-                    continue;
-                }
-
-                        Elements html = doc.getElementsByTag("a");
-                try {
-                    scrapeLinks(html);
-                } catch (IOException e) {
+                    TimeUnit.SECONDS.sleep(1);
+                } catch (InterruptedException e) {
                     throw new RuntimeException(e);
                 }
-                        html = doc.getAllElements();
-                        scrapeEmails(html, link);
-                            System.out.println(doc.title());
-                            System.out.println("emailSet:" + emailSet);
-                            System.out.println("emailset size:" + emailSet.size());
-
             }
+
+            try {
+                this.doc = Jsoup.connect(link)
+                        //.ignoreHttpErrors(true)
+                        .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.6998.166 Safari/537.36")
+                        .get();
+            } catch (IllegalArgumentException e) {
+                e.printStackTrace();
+                continue;
+            } catch (UnknownHostException e) {
+                e.printStackTrace();
+                continue;
+            } catch (HttpStatusException e) {
+                e.printStackTrace();
+                continue;
+            } catch (IOException e) {
+                e.printStackTrace();
+                continue;
+            }
+
+            Elements html = doc.getElementsByTag("a");
+            try {
+                scrapeLinks(html);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            html = doc.getAllElements();
+            scrapeEmails(html, link);
+//            System.out.println(doc.title());
+//            System.out.println("emailSet:" + emailSet);
+            System.out.println("emailset size:" + emailSet.size());
+        }
     }
 
 
@@ -210,23 +194,31 @@ public class WebScraper implements Runnable {
         String htmlString = html.toString();
         Pattern pattern = Pattern.compile("(?i)[A-Z0-9._%+-]+@[A-Z0-9\\.-_]+\\.[A-Z]{2,10}"); //TODO get a better regex from very good developers on stackoverflow
         Matcher matcher = pattern.matcher(htmlString);
+        int emailsFound = 0;
 //        logger.info("before while loop");
         while (matcher.find()) {
 //            logger.info("inside while loop");
             String email = matcher.group().toUpperCase();
             if(email.endsWith(".PNG") || email.endsWith(".JPG") || email.endsWith(".JPEG")
-            || email.endsWith(".GIF") || email.endsWith(".PDF") || email.endsWith(".WEBP")
-            || email.contains("SENTRY") || email.endsWith(".SVG") || email.endsWith(".WEBPACK")
-            || email.endsWith(".CSS") || email.endsWith(".JS") || email.endsWith(".HTML")) {
+                    || email.endsWith(".GIF") || email.endsWith(".PDF") || email.endsWith(".WEBP")
+                    || email.contains("SENTRY") || email.endsWith(".SVG") || email.endsWith(".WEBPACK")
+                    || email.endsWith(".CSS") || email.endsWith(".JS") || email.endsWith(".HTML")
+                    || email.endsWith(".MP") || email.endsWith(".WEBM") || email.endsWith(".XLSX")
+                    || email.endsWith(".XLS")) {
                 continue;
             }
 //            logger.info("inside while loop after to upper case");//(?!.*(\.png|\.jpg|\.gif|\.pdf).*)
             if (emailSet.add(email)){
-                logger.info("emailID: " + emailCount.incrementAndGet() + " email: " + email);
-                emailDataQueue.add(new EmailData(emailCount, email, link, Timestamp.valueOf(LocalDateTime.now())));
-                logger.info(emailDataQueue.toString());
+                emailsFound++;
+                int currentEmailId = emailCount.incrementAndGet();
+                logger.info("emailID: " + currentEmailId + " email: " + email + " from: " + link);
+                emailDataQueue.add(new EmailData(currentEmailId, email, link, Timestamp.valueOf(LocalDateTime.now())));
+//                logger.info("Added to queue. Queue size now: " + emailDataQueue.size());
             }
         }
+//        if (emailsFound > 0) {
+//            logger.info("Found " + emailsFound + " emails on " + link);
+//        }
 //        logger.info("after while loop");
     }
 
@@ -239,7 +231,7 @@ public class WebScraper implements Runnable {
 
     public void scrapeLinks(Elements html) throws IOException {
         String htmlString = html.toString();
-        Pattern pattern = Pattern.compile("(?i)(?!.*(\\.png|\\.jpg|\\.gif|\\.pdf|twitter|vimeo|x\\.com|\\.gov).*)https?:\\/\\/(www\\.)?[-a-zA-Z0-9@:%._\\+~#=]{1,256}\\.[a-zA-Z0-9()]{1,6}\\b([-a-zA-Z0-9()!@:%_\\+.~#?&\\/\\/=]*)");
+        Pattern pattern = Pattern.compile("(?i)(?!.*(\\.png|\\.jpg|\\.gif|\\.pdf|twitter|vimeo|x\\.com|facebook|\\.gov).*)https?:\\/\\/(www\\.)?[-a-zA-Z0-9@:%._\\+~#=]{1,256}\\.[a-zA-Z0-9()]{1,6}\\b([-a-zA-Z0-9()!@:%_\\+.~#?&\\/\\/=]*)");
         Matcher matcher = pattern.matcher(htmlString);
         while (matcher.find()) {
             String link = matcher.group(0).toUpperCase();
@@ -295,10 +287,10 @@ public class WebScraper implements Runnable {
             return false;
         } //emailSet:[%20MARKETING@HIRINGTHING.COM, PRIVACY@IMPERVA.COM, CANGRADE@4X.PNG, HT-ATS-AND-OB-ILLUSTRATION-HOMEPAGE@2X-1024X893.PNG, SUPPORT@HIRINGTHING.COM, HT-ATS-ILLUSTRATION-BOTH-HEX-FOR-LIGHT@2X-1024X685.PNG, 3BBE57A973254129BCB93E47DC0CC46F@O343074.INGEST.SENTRY.IO, INFO@HRLOGICS.COM, HIRINGTHING-LOGO-BLUE@2X.PNG, CUSTOMERSERVICE@ADVANCED-ONLINE.COM, MARKETING@HIRINGTHING.COM, INFO@JOBMA.COM]
         rules = parser.parseContent(url, content, "text/plain", agentNames);
-            boolean isAllowed = rules.isAllowed(url);
-            robotsTxtMap.put(url, isAllowed);
+        boolean isAllowed = rules.isAllowed(url);
+        robotsTxtMap.put(url, isAllowed);
 //            logger.info("isAllowed: " + isAllowed);
-            return isAllowed;
+        return isAllowed;
     }
 
     public boolean isValidURL(String link) {
@@ -314,6 +306,7 @@ public class WebScraper implements Runnable {
         return validator.isValid(link);
     }
 }
+
 
 
 
