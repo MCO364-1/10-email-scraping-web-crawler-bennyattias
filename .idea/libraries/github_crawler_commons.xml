@@ -1,0 +1,12 @@
+<component name="libraryTable">
+  <library name="github.crawler.commons" type="repository">
+    <properties maven-id="com.github.crawler-commons:crawler-commons:1.4" />
+    <CLASSES>
+      <root url="jar://$MAVEN_REPOSITORY$/com/github/crawler-commons/crawler-commons/1.4/crawler-commons-1.4.jar!/" />
+      <root url="jar://$MAVEN_REPOSITORY$/commons-io/commons-io/2.13.0/commons-io-2.13.0.jar!/" />
+      <root url="jar://$MAVEN_REPOSITORY$/org/slf4j/slf4j-api/2.0.7/slf4j-api-2.0.7.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
